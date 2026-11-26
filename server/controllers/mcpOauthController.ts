@@ -24,9 +24,12 @@ function setNoStoreHeaders(res: Response): void {
 function setConsentSecurityHeaders(res: Response): void {
   setNoStoreHeaders(res);
   res.setHeader('Referrer-Policy', 'no-referrer');
+  // Note: Intentionally omit `form-action` so browsers allow the 302 redirect
+  // from POST /oauth/authorize to verified external OAuth redirect_uri callbacks
+  // (e.g. https://chatgpt.com/connector/oauth/... or https://gemini.google.com/...).
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'"
+    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'"
   );
 }
 
@@ -63,6 +66,7 @@ function renderConsentPage(params: {
   codeChallengeMethod: string;
   state: string;
   scope: string;
+  resource: string;
   identifier?: string;
   errorMessage?: string;
 }): string {
@@ -123,6 +127,7 @@ function renderConsentPage(params: {
       <input type="hidden" name="code_challenge_method" value="${escapeHtml(params.codeChallengeMethod)}" />
       <input type="hidden" name="state" value="${escapeHtml(params.state)}" />
       <input type="hidden" name="scope" value="${escapeHtml(params.scope)}" />
+      <input type="hidden" name="resource" value="${escapeHtml(params.resource)}" />
 
       <div class="field">
         <label for="oauth-identifier">Email or Phone</label>
@@ -189,6 +194,7 @@ export async function authorizeGetHandler(req: Request, res: Response): Promise<
     typeof req.query.code_challenge_method === 'string' ? req.query.code_challenge_method : 'S256';
   const state = typeof req.query.state === 'string' ? req.query.state : '';
   const scope = typeof req.query.scope === 'string' ? req.query.scope : 'mcp';
+  const resource = typeof req.query.resource === 'string' ? req.query.resource : '';
 
   try {
     const { client, redirectUri: verifiedRedirect } = await validateAuthorizationRequest({
@@ -208,6 +214,7 @@ export async function authorizeGetHandler(req: Request, res: Response): Promise<
         codeChallengeMethod: 'S256',
         state,
         scope,
+        resource,
       })
     );
   } catch (error) {
@@ -220,7 +227,8 @@ export async function authorizeGetHandler(req: Request, res: Response): Promise<
 }
 
 export async function authorizePostHandler(req: Request, res: Response): Promise<void> {
-  setConsentSecurityHeaders(res);
+  setNoStoreHeaders(res);
+  res.setHeader('Referrer-Policy', 'no-referrer');
 
   const body = (req.body || {}) as Record<string, unknown>;
   const clientId = typeof body.client_id === 'string' ? body.client_id : '';
@@ -231,7 +239,13 @@ export async function authorizePostHandler(req: Request, res: Response): Promise
     typeof body.code_challenge_method === 'string' ? body.code_challenge_method : 'S256';
   const state = typeof body.state === 'string' ? body.state : '';
   const scope = typeof body.scope === 'string' ? body.scope : 'mcp';
-  const identifier = typeof body.identifier === 'string' ? body.identifier : '';
+  const resource = typeof body.resource === 'string' ? body.resource : '';
+  const identifier =
+    typeof body.identifier === 'string'
+      ? body.identifier
+      : typeof body.email === 'string'
+        ? body.email
+        : '';
   const password = typeof body.password === 'string' ? body.password : '';
   const decision = typeof body.decision === 'string' ? body.decision : 'approve';
 
@@ -248,6 +262,7 @@ export async function authorizePostHandler(req: Request, res: Response): Promise
     verifiedClientName = validation.client.name;
     verifiedRedirect = validation.redirectUri;
   } catch (error) {
+    setConsentSecurityHeaders(res);
     const message =
       error instanceof OAuthProtocolError
         ? error.message
@@ -283,7 +298,7 @@ export async function authorizePostHandler(req: Request, res: Response): Promise
       entity_type: 'OAuthClient',
       entity_id: client.client_id,
       source: 'Web',
-      details: `Approved OAuth 2.1 MCP connection for "${client.name}"`,
+      details: `Approved OAuth 2.1 MCP connection for "${client.name}"${resource ? ` (${resource})` : ''}`,
     });
 
     const callbackUrl = new URL(verifiedRedirect);
@@ -293,6 +308,7 @@ export async function authorizePostHandler(req: Request, res: Response): Promise
     }
     res.redirect(302, callbackUrl.toString());
   } catch (error) {
+    setConsentSecurityHeaders(res);
     const errMsg =
       error instanceof AuthError || error instanceof OAuthProtocolError
         ? error.message
@@ -307,6 +323,7 @@ export async function authorizePostHandler(req: Request, res: Response): Promise
         codeChallengeMethod: 'S256',
         state,
         scope,
+        resource,
         identifier,
         errorMessage: errMsg,
       })

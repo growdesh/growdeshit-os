@@ -37,10 +37,23 @@ export function createExpressApp(): Express {
   });
 
   app.use(express.json({ limit: '1mb' }));
-  app.use(express.urlencoded({ extended: false, limit: '256kb' }));
+  app.use(express.urlencoded({ extended: true, limit: '256kb' }));
 
-  // RFC 9728 & RFC 8414 OAuth 2.1 Discovery Endpoints (root level)
-  app.use('/.well-known', wellKnownRouter);
+  // RFC 9728 & RFC 8414 Public OAuth 2.1 Discovery Endpoints (root level, before SPA fallback)
+  app.use(
+    '/.well-known',
+    (req: Request, res: Response, next: NextFunction) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Accept, Content-Type');
+      if (req.method === 'OPTIONS') {
+        res.sendStatus(204);
+        return;
+      }
+      next();
+    },
+    wellKnownRouter
+  );
 
   const ensureDbMiddleware = async (_req: Request, _res: Response, next: NextFunction) => {
     try {
