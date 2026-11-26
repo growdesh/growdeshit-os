@@ -228,6 +228,58 @@ export async function markSchedulePaid(
   return { schedule: updated, payment };
 }
 
+export async function getPaymentScheduleById(
+  projectId: number,
+  scheduleId: number
+): Promise<PaymentScheduleWithProject | null> {
+  const list = await listPaymentSchedules(projectId);
+  return list.find((s) => s.id === scheduleId) ?? null;
+}
+
+export async function linkPaymentToSchedule(
+  projectId: number,
+  scheduleId: number,
+  paymentId: number
+): Promise<PaymentScheduleWithProject> {
+  if (isMysqlMode()) {
+    const pool = getPool();
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      'SELECT id, status FROM payment_schedules WHERE id = ? AND project_id = ? LIMIT 1',
+      [scheduleId, projectId]
+    );
+    if (rows.length === 0) {
+      throw new ServiceError('Payment schedule not found for this project.', 404);
+    }
+
+    await pool.execute(
+      `UPDATE payment_schedules SET status = 'Paid', paid_payment_id = ? WHERE id = ? AND project_id = ?`,
+      [paymentId, scheduleId, projectId]
+    );
+    await pool.execute('UPDATE notifications SET is_read = 1 WHERE schedule_id = ?', [scheduleId]);
+
+    const updated = await getPaymentScheduleById(projectId, scheduleId);
+    if (!updated) throw new ServiceError('Failed to load updated payment schedule.', 500);
+    return updated;
+  }
+
+  const existing = memoryStore.paymentSchedules.find(
+    (s) => s.id === scheduleId && s.project_id === projectId
+  );
+  if (!existing) {
+    throw new ServiceError('Payment schedule not found for this project.', 404);
+  }
+  existing.status = 'Paid';
+  existing.paid_payment_id = paymentId;
+  for (const notif of memoryStore.notifications) {
+    if (notif.schedule_id === scheduleId) {
+      notif.is_read = true;
+    }
+  }
+  const updated = await getPaymentScheduleById(projectId, scheduleId);
+  if (!updated) throw new ServiceError('Failed to load updated payment schedule.', 500);
+  return updated;
+}
+
 export async function deletePaymentSchedule(projectId: number, scheduleId: number): Promise<void> {
   if (isMysqlMode()) {
     const [result] = await getPool().execute<ResultSetHeader>(

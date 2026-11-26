@@ -10,8 +10,11 @@ import {
   canDeleteRecords,
   canManageUsers,
   canViewAllAuditLogs,
+  classifyScheduleDueState,
+  computeCollectionRatePercent,
   computeDashboardKPIs,
   computePkceS256Challenge,
+  computeProfitMarginPercent,
   escapeHtml,
   formatBdtPlain,
   generateCustomerCode,
@@ -19,6 +22,8 @@ import {
   generateProjectCode,
   hashMcpToken,
   isScheduleDueOrOverdue,
+  isValidIsoDate,
+  isValidYearMonth,
   sanitizeProjectForMcp,
   timingSafeHashMatch,
   validateNonNegativeAmount,
@@ -227,4 +232,29 @@ test('OAuth 2.1 PKCE S256, redirect URI validation, secret hashing, and HTML esc
     escapeHtml('<script>alert("xss")</script>'),
     '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;'
   );
+});
+
+test('strict calendar date/month validators, schedule due-state classification, and ratio helpers work accurately', () => {
+  assert.equal(isValidIsoDate('2026-11-26'), true);
+  assert.equal(isValidIsoDate('2024-02-29'), true);
+  assert.equal(isValidIsoDate('2026-02-29'), false);
+  assert.equal(isValidIsoDate('2026-02-30'), false);
+  assert.equal(isValidIsoDate('2026-13-01'), false);
+  assert.equal(isValidIsoDate('26-11-2026'), false);
+
+  assert.equal(isValidYearMonth('2026-11'), true);
+  assert.equal(isValidYearMonth('2026-00'), false);
+  assert.equal(isValidYearMonth('2026-13'), false);
+  assert.equal(isValidYearMonth('2026-1'), false);
+
+  assert.equal(classifyScheduleDueState('2026-11-20', 'Pending', '2026-11-26'), 'Overdue');
+  assert.equal(classifyScheduleDueState('2026-11-26', 'Pending', '2026-11-26'), 'Due Today');
+  assert.equal(classifyScheduleDueState('2026-12-05', 'Pending', '2026-11-26'), 'Upcoming');
+  assert.equal(classifyScheduleDueState('2026-11-20', 'Paid', '2026-11-26'), 'Paid');
+
+  assert.equal(computeProfitMarginPercent(200000, 150000), 75);
+  assert.equal(computeProfitMarginPercent(0, -5000), 0);
+  assert.equal(computeCollectionRatePercent(100000, 45000), 45);
+  assert.equal(computeCollectionRatePercent(100000, 120000), 100);
+  assert.equal(computeCollectionRatePercent(0, 0), 0);
 });

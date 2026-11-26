@@ -7,6 +7,7 @@ export type NoteCategory = 'Client Discussion' | 'Development' | 'Work/General';
 export type TransactionType = 'Income' | 'Expense';
 export type ActivitySource = 'Web' | 'MCP';
 export type PaymentScheduleStatus = 'Pending' | 'Paid';
+export type ScheduleDueState = 'Paid' | 'Overdue' | 'Due Today' | 'Upcoming';
 
 export const CUSTOMER_STATUSES: readonly CustomerStatus[] = ['Active', 'Lead', 'Inactive'];
 export const PROJECT_STATUSES: readonly ProjectStatus[] = [
@@ -74,6 +75,42 @@ export interface ProjectStatusBreakdownPoint {
 export function roundMoney(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.round(value * 100) / 100;
+}
+
+export function isValidIsoDate(value: string): boolean {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!match) return false;
+  const year = Number.parseInt(match[1], 10);
+  const month = Number.parseInt(match[2], 10);
+  const day = Number.parseInt(match[3], 10);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+export function isValidYearMonth(value: string): boolean {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  const match = /^(\d{4})-(\d{2})$/.exec(trimmed);
+  if (!match) return false;
+  const month = Number.parseInt(match[2], 10);
+  return month >= 1 && month <= 12;
+}
+
+export function computeProfitMarginPercent(totalIncome: number, netProfit: number): number {
+  if (!Number.isFinite(totalIncome) || totalIncome <= 0) return 0;
+  return roundMoney((netProfit / totalIncome) * 100);
+}
+
+export function computeCollectionRatePercent(totalBudget: number, totalCollected: number): number {
+  if (!Number.isFinite(totalBudget) || totalBudget <= 0) return 0;
+  return roundMoney(Math.min(100, (Math.max(0, totalCollected) / totalBudget) * 100));
 }
 
 export function formatBdtPlain(amount: number): string {
@@ -204,6 +241,19 @@ export function isScheduleDueOrOverdue(
   const normalizedDue = dueDate.slice(0, 10);
   const normalizedToday = todayIso.slice(0, 10);
   return Boolean(normalizedDue) && normalizedDue <= normalizedToday;
+}
+
+export function classifyScheduleDueState(
+  dueDate: string,
+  status: PaymentScheduleStatus,
+  todayIso: string
+): ScheduleDueState {
+  if (status === 'Paid') return 'Paid';
+  const normalizedDue = dueDate.slice(0, 10);
+  const normalizedToday = todayIso.slice(0, 10);
+  if (normalizedDue < normalizedToday) return 'Overdue';
+  if (normalizedDue === normalizedToday) return 'Due Today';
+  return 'Upcoming';
 }
 
 export function sanitizeProjectForMcp<

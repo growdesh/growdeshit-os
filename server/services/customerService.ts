@@ -10,12 +10,23 @@ import {
   CUSTOMER_STATUSES,
   calculateProjectFinancials,
   generateCustomerCode,
+  roundMoney,
   type CustomerStatus,
 } from '../utils/businessLogic';
 
 export interface CustomerWithStats extends CustomerRecord {
   project_count: number;
   total_budget: number;
+}
+
+export interface AnonymizedCustomerSummary {
+  customer_code: string;
+  status: CustomerStatus;
+  project_count: number;
+  total_budget_bdt: number;
+  total_paid_bdt: number;
+  total_due_bdt: number;
+  created_at: string;
 }
 
 export interface CustomerDetail extends CustomerRecord {
@@ -100,6 +111,111 @@ export async function listCustomers(filters?: {
         ...c,
         project_count: linked.length,
         total_budget: linked.reduce((sum, p) => sum + Number(p.budget || 0), 0),
+      };
+    });
+}
+
+/**
+ * Returns strictly anonymized customer summaries (zero PII: no name, email, phone, company, or notes)
+ * with authoritative BDT totals computed per project. Designed for MCP / AI assistants.
+ */
+export async function listAnonymizedCustomerSummaries(
+  status?: string
+): Promise<AnonymizedCustomerSummary[]> {
+  const statusFilter = status?.trim() || '';
+
+  if (isMysqlMode()) {
+    const pool = getPool();
+    const conditions: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (statusFilter && statusFilter !== 'All') {
+      conditions.push('status = ?');
+      params.push(statusFilter);
+    }
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Intentionally select ZERO PII columns from customers table
+    const [customerRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT id, customer_code, status, created_at
+       FROM customers
+       ${whereClause}
+       ORDER BY id DESC`,
+      params
+    );
+
+    const [projectRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT p.id, p.customer_id, p.budget,
+        COALESCE(SUM(pp.amount), 0) AS paid_amount
+       FROM projects p
+       LEFT JOIN project_payments pp ON pp.project_id = p.id
+       GROUP BY p.id, p.customer_id, p.budget`
+    );
+
+    const projectsByCustomer = new Map<
+      number,
+      Array<{ budget: number; paid: number }>
+    >();
+    for (const row of projectRows) {
+      const cid = Number(row.customer_id);
+      const list = projectsByCustomer.get(cid) ?? [];
+      list.push({
+        budget: Number(row.budget ?? 0),
+        paid: Number(row.paid_amount ?? 0),
+      });
+      projectsByCustomer.set(cid, list);
+    }
+
+    return customerRows.map((row) => {
+      const cid = Number(row.id);
+      const projects = projectsByCustomer.get(cid) ?? [];
+      let totalBudget = 0;
+      let totalPaid = 0;
+      let totalDue = 0;
+      for (const proj of projects) {
+        const fin = calculateProjectFinancials(proj.budget, [{ amount: proj.paid }]);
+        totalBudget += fin.totalBudget;
+        totalPaid += fin.paidAmount;
+        totalDue += fin.dueAmount;
+      }
+      return {
+        customer_code: String(row.customer_code),
+        status: String(row.status) as CustomerStatus,
+        project_count: projects.length,
+        total_budget_bdt: roundMoney(totalBudget),
+        total_paid_bdt: roundMoney(totalPaid),
+        total_due_bdt: roundMoney(totalDue),
+        created_at:
+          row.created_at instanceof Date
+            ? row.created_at.toISOString()
+            : String(row.created_at),
+      };
+    });
+  }
+
+  return memoryStore.customers
+    .filter((c) => !statusFilter || statusFilter === 'All' || c.status === statusFilter)
+    .sort((a, b) => b.id - a.id)
+    .map((c) => {
+      const linked = memoryStore.projects.filter((p) => p.customer_id === c.id);
+      let totalBudget = 0;
+      let totalPaid = 0;
+      let totalDue = 0;
+      for (const proj of linked) {
+        const payments = memoryStore.projectPayments.filter((pm) => pm.project_id === proj.id);
+        const fin = calculateProjectFinancials(proj.budget, payments);
+        totalBudget += fin.totalBudget;
+        totalPaid += fin.paidAmount;
+        totalDue += fin.dueAmount;
+      }
+      return {
+        customer_code: c.customer_code,
+        status: c.status,
+        project_count: linked.length,
+        total_budget_bdt: roundMoney(totalBudget),
+        total_paid_bdt: roundMoney(totalPaid),
+        total_due_bdt: roundMoney(totalDue),
+        created_at: c.created_at,
       };
     });
 }
