@@ -11,6 +11,7 @@ import {
 import { getJwtSecret, type AuthTokenPayload } from '../middleware/authMiddleware';
 import { hashMcpToken } from '../utils/businessLogic';
 import { ServiceError } from './customerService';
+import { authenticateOAuthAccessToken } from './mcpOauthService';
 
 export interface SafeMcpToken {
   id: number;
@@ -123,6 +124,10 @@ export async function authenticateMcpBearerToken(
 ): Promise<AuthTokenPayload | null> {
   const trimmed = rawToken.trim();
   if (!trimmed) return null;
+
+  if (trimmed.startsWith('gdit_oauth_')) {
+    return authenticateOAuthAccessToken(trimmed);
+  }
 
   if (trimmed.startsWith('gdit_mcp_')) {
     const tokenHash = hashMcpToken(trimmed);

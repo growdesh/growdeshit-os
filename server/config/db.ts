@@ -143,6 +143,41 @@ export interface McpTokenRecord {
   created_at: string;
 }
 
+export interface McpOauthClientRecord {
+  id: number;
+  name: string;
+  client_id: string;
+  client_secret_hash: string;
+  redirect_uris: string[];
+  created_by: number | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface McpOauthCodeRecord {
+  code_hash: string;
+  client_id: string;
+  user_id: number;
+  redirect_uri: string;
+  code_challenge: string;
+  code_challenge_method: string;
+  expires_at: string;
+  used_at: string | null;
+  created_at: string;
+}
+
+export interface McpOauthTokenRecord {
+  id: number;
+  access_token_hash: string;
+  refresh_token_hash: string;
+  client_id: string;
+  user_id: number;
+  expires_at: string;
+  refresh_expires_at: string;
+  revoked_at: string | null;
+  created_at: string;
+}
+
 export interface MemoryStore {
   users: UserRecord[];
   customers: CustomerRecord[];
@@ -155,6 +190,9 @@ export interface MemoryStore {
   transactions: TransactionRecord[];
   activityLogs: ActivityLogRecord[];
   mcpTokens: McpTokenRecord[];
+  mcpOauthClients: McpOauthClientRecord[];
+  mcpOauthCodes: McpOauthCodeRecord[];
+  mcpOauthTokens: McpOauthTokenRecord[];
   seq: {
     users: number;
     customers: number;
@@ -167,6 +205,8 @@ export interface MemoryStore {
     transactions: number;
     activityLogs: number;
     mcpTokens: number;
+    mcpOauthClients: number;
+    mcpOauthTokens: number;
   };
 }
 
@@ -601,6 +641,9 @@ function createSeedMemoryStore(): MemoryStore {
       },
     ],
     mcpTokens: [],
+    mcpOauthClients: [],
+    mcpOauthCodes: [],
+    mcpOauthTokens: [],
     seq: {
       users: 1,
       customers: 5,
@@ -613,6 +656,8 @@ function createSeedMemoryStore(): MemoryStore {
       transactions: 9,
       activityLogs: 3,
       mcpTokens: 1,
+      mcpOauthClients: 1,
+      mcpOauthTokens: 1,
     },
   };
 }

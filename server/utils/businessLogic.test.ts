@@ -11,6 +11,8 @@ import {
   canManageUsers,
   canViewAllAuditLogs,
   computeDashboardKPIs,
+  computePkceS256Challenge,
+  escapeHtml,
   formatBdtPlain,
   generateCustomerCode,
   generateInvoiceNumber,
@@ -18,8 +20,11 @@ import {
   hashMcpToken,
   isScheduleDueOrOverdue,
   sanitizeProjectForMcp,
+  timingSafeHashMatch,
   validateNonNegativeAmount,
+  validateOAuthRedirectUri,
   validatePositiveAmount,
+  verifyPkceS256,
 } from './businessLogic';
 
 test('auto-generated IDs start at configured baselines and increment monotonically', () => {
@@ -192,4 +197,34 @@ test('default Superadmin seeder creates hashed account once and never duplicates
   seedMemoryDefaultSuperadmin(mockStore);
   assert.equal(mockStore.users.length, 1);
   assert.equal(mockStore.users[0].name, 'Emon Hosen (Updated)');
+});
+
+test('OAuth 2.1 PKCE S256, redirect URI validation, secret hashing, and HTML escaping behave securely', () => {
+  const verifier = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk_valid_verifier_12345';
+  const challenge = computePkceS256Challenge(verifier);
+  assert.equal(verifyPkceS256(verifier, challenge), true);
+  assert.equal(verifyPkceS256(verifier + 'x', challenge), false);
+  assert.equal(verifyPkceS256('too_short', challenge), false);
+
+  const secret = 'gdit_cs_super_secret_value_1234567890';
+  const secretHash = hashMcpToken(secret);
+  assert.equal(timingSafeHashMatch(secret, secretHash), true);
+  assert.equal(timingSafeHashMatch('wrong_secret', secretHash), false);
+
+  assert.equal(
+    validateOAuthRedirectUri('https://gemini.google.com/oauth/callback'),
+    'https://gemini.google.com/oauth/callback'
+  );
+  assert.equal(
+    validateOAuthRedirectUri('http://localhost:8080/callback'),
+    'http://localhost:8080/callback'
+  );
+  assert.equal(validateOAuthRedirectUri('http://example.com/callback'), null);
+  assert.equal(validateOAuthRedirectUri('javascript:alert(1)'), null);
+  assert.equal(validateOAuthRedirectUri('https://gemini.google.com/cb#frag'), null);
+
+  assert.equal(
+    escapeHtml('<script>alert("xss")</script>'),
+    '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;'
+  );
 });

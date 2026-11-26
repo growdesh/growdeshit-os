@@ -7,6 +7,7 @@ import dashboardRoutes from './routes/dashboardRoutes';
 import financeRoutes from './routes/financeRoutes';
 import mcpRoutes from './routes/mcpRoutes';
 import notificationRoutes from './routes/notificationRoutes';
+import { oauthRouter, wellKnownRouter } from './routes/oauthRoutes';
 import projectRoutes from './routes/projectRoutes';
 import reportRoutes from './routes/reportRoutes';
 
@@ -36,15 +37,24 @@ export function createExpressApp(): Express {
   });
 
   app.use(express.json({ limit: '1mb' }));
+  app.use(express.urlencoded({ extended: false, limit: '256kb' }));
 
-  app.use('/api', async (_req: Request, _res: Response, next: NextFunction) => {
+  // RFC 9728 & RFC 8414 OAuth 2.1 Discovery Endpoints (root level)
+  app.use('/.well-known', wellKnownRouter);
+
+  const ensureDbMiddleware = async (_req: Request, _res: Response, next: NextFunction) => {
     try {
       await ensureDatabaseInitialized();
       next();
     } catch (error) {
       next(error);
     }
-  });
+  };
+
+  // OAuth 2.1 Authorization & Token Endpoints (root level)
+  app.use('/oauth', ensureDbMiddleware, oauthRouter);
+
+  app.use('/api', ensureDbMiddleware);
 
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({

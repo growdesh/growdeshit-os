@@ -172,3 +172,48 @@ CREATE TABLE IF NOT EXISTS mcp_tokens (
   INDEX idx_mcp_tokens_user (user_id),
   INDEX idx_mcp_tokens_hash (token_hash)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  client_id VARCHAR(80) NOT NULL UNIQUE,
+  client_secret_hash VARCHAR(64) NOT NULL,
+  redirect_uris TEXT NOT NULL,
+  created_by INT NULL,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_mcp_oauth_clients_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_mcp_oauth_clients_active (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS mcp_oauth_codes (
+  code_hash VARCHAR(64) PRIMARY KEY,
+  client_id VARCHAR(80) NOT NULL,
+  user_id INT NOT NULL,
+  redirect_uri VARCHAR(512) NOT NULL,
+  code_challenge VARCHAR(128) NOT NULL,
+  code_challenge_method VARCHAR(16) NOT NULL DEFAULT 'S256',
+  expires_at DATETIME NOT NULL,
+  used_at DATETIME NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_mcp_oauth_codes_client FOREIGN KEY (client_id) REFERENCES mcp_oauth_clients(client_id) ON DELETE CASCADE,
+  CONSTRAINT fk_mcp_oauth_codes_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_mcp_oauth_codes_client (client_id),
+  INDEX idx_mcp_oauth_codes_expires (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS mcp_oauth_tokens (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  access_token_hash VARCHAR(64) NOT NULL UNIQUE,
+  refresh_token_hash VARCHAR(64) NOT NULL UNIQUE,
+  client_id VARCHAR(80) NOT NULL,
+  user_id INT NOT NULL,
+  expires_at DATETIME NOT NULL,
+  refresh_expires_at DATETIME NOT NULL,
+  revoked_at DATETIME NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_mcp_oauth_tokens_client FOREIGN KEY (client_id) REFERENCES mcp_oauth_clients(client_id) ON DELETE CASCADE,
+  CONSTRAINT fk_mcp_oauth_tokens_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_mcp_oauth_tokens_client (client_id),
+  INDEX idx_mcp_oauth_tokens_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

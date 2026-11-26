@@ -7,6 +7,7 @@ import type {
   DashboardOverview,
   FinancialReport,
   InvoiceDetail,
+  McpOAuthClient,
   McpToken,
   NoteCategory,
   PaymentSchedule,
@@ -321,4 +322,20 @@ export const api = {
     }),
   revokeMcpToken: (id: number) =>
     request<{ success: boolean }>(`/api/mcp/tokens/${id}`, { method: 'DELETE' }),
+
+  // MCP OAuth 2.1 Clients (Superadmin)
+  listOAuthClients: () =>
+    request<{ clients: McpOAuthClient[]; mcpServerUrl: string; appUrl: string }>(
+      '/api/mcp/oauth-clients'
+    ),
+  createOAuthClient: (body: { name: string; redirect_uri: string }) =>
+    request<{ client: McpOAuthClient; clientSecret: string; mcpServerUrl: string }>(
+      '/api/mcp/oauth-clients',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    ),
+  revokeOAuthClient: (id: number) =>
+    request<{ success: boolean }>(`/api/mcp/oauth-clients/${id}`, { method: 'DELETE' }),
 };

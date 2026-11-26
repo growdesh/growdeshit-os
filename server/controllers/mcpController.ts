@@ -3,6 +3,7 @@ import type { NextFunction, Response } from 'express';
 import type { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { logActivity } from '../services/auditService';
 import { ServiceError } from '../services/customerService';
+import { resolveAppBaseUrl } from '../services/mcpOauthService';
 import { createGrowDeshMcpServer } from '../services/mcpServerService';
 import {
   authenticateMcpBearerToken,
@@ -11,6 +12,14 @@ import {
   revokeMcpToken,
 } from '../services/mcpTokenService';
 
+function setMcpWwwAuthenticateHeader(req: AuthenticatedRequest, res: Response): void {
+  const baseUrl = resolveAppBaseUrl(req);
+  res.setHeader(
+    'WWW-Authenticate',
+    `Bearer resource_metadata="${baseUrl}/.well-known/oauth-protected-resource"`
+  );
+}
+
 export async function authenticateMcpRequest(
   req: AuthenticatedRequest,
   res: Response,
@@ -18,11 +27,12 @@ export async function authenticateMcpRequest(
 ): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    setMcpWwwAuthenticateHeader(req, res);
     res.status(401).json({
       jsonrpc: '2.0',
       error: {
         code: -32001,
-        message: 'Unauthorized: Missing Bearer token. Generate an MCP token in GrowDeshIT OS.',
+        message: 'Unauthorized: Missing Bearer token. Authenticate via OAuth 2.1 or Personal MCP Token.',
       },
       id: null,
     });
@@ -32,11 +42,12 @@ export async function authenticateMcpRequest(
   const rawToken = authHeader.slice(7).trim();
   const user = await authenticateMcpBearerToken(rawToken);
   if (!user) {
+    setMcpWwwAuthenticateHeader(req, res);
     res.status(401).json({
       jsonrpc: '2.0',
       error: {
         code: -32001,
-        message: 'Unauthorized: Invalid or revoked MCP Bearer token.',
+        message: 'Unauthorized: Invalid, expired, or revoked MCP Bearer token.',
       },
       id: null,
     });

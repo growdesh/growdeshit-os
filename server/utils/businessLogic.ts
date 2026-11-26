@@ -298,6 +298,71 @@ export function hashMcpToken(rawToken: string): string {
   return crypto.createHash('sha256').update(rawToken).digest('hex');
 }
 
+export function computePkceS256Challenge(codeVerifier: string): string {
+  return crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+}
+
+export function verifyPkceS256(codeVerifier: string, expectedChallenge: string): boolean {
+  if (
+    typeof codeVerifier !== 'string' ||
+    typeof expectedChallenge !== 'string' ||
+    codeVerifier.length < 43 ||
+    codeVerifier.length > 128 ||
+    expectedChallenge.length < 43 ||
+    expectedChallenge.length > 128
+  ) {
+    return false;
+  }
+  const computed = computePkceS256Challenge(codeVerifier);
+  const a = Buffer.from(computed, 'utf8');
+  const b = Buffer.from(expectedChallenge, 'utf8');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+export function timingSafeHashMatch(rawValue: string, expectedHexHash: string): boolean {
+  if (!rawValue || !expectedHexHash || expectedHexHash.length !== 64) {
+    return false;
+  }
+  const computedHex = hashMcpToken(rawValue);
+  const a = Buffer.from(computedHex, 'hex');
+  const b = Buffer.from(expectedHexHash, 'hex');
+  if (a.length !== b.length || a.length !== 32) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+export function validateOAuthRedirectUri(rawUri: string): string | null {
+  const trimmed = (rawUri || '').trim();
+  if (!trimmed || trimmed.length > 512) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+  // OAuth 2.1 forbids URI fragments in redirect_uri
+  if (parsed.hash) return null;
+
+  const isHttps = parsed.protocol === 'https:';
+  const isLoopbackHttp =
+    parsed.protocol === 'http:' &&
+    (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1');
+
+  if (!isHttps && !isLoopbackHttp) {
+    return null;
+  }
+  return trimmed;
+}
+
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export function normalizeIdentifier(value: string): string {
   return value.trim().toLowerCase();
 }

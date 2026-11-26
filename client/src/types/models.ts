@@ -283,3 +283,13 @@ export interface McpToken {
   revoked_at: string | null;
   created_at: string;
 }
+
+export interface McpOAuthClient {
+  id: number;
+  name: string;
+  client_id: string;
+  redirect_uris: string[];
+  created_by: number | null;
+  is_active: boolean;
+  created_at: string;
+}
