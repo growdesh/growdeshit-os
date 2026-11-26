@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import bcrypt from 'bcryptjs';
+import { DEFAULT_SUPERADMIN, seedMemoryDefaultSuperadmin } from '../database/bootstrap';
+import type { MemoryStore } from '../config/db';
 import {
   buildMonthlyCashflowSeries,
   buildProjectStatusBreakdown,
@@ -166,4 +169,27 @@ test('amount validators, token hashing, and RBAC checks enforce domain boundarie
   assert.equal(canDeleteRecords('employee'), false);
   assert.equal(canViewAllAuditLogs('superadmin'), true);
   assert.equal(canViewAllAuditLogs('employee'), false);
+});
+
+test('default Superadmin seeder creates hashed account once and never duplicates or overwrites', () => {
+  const mockStore = {
+    users: [],
+    seq: { users: 1 },
+  } as unknown as MemoryStore;
+
+  seedMemoryDefaultSuperadmin(mockStore);
+  assert.equal(mockStore.users.length, 1);
+  assert.equal(mockStore.users[0].name, 'Emon Hosen');
+  assert.equal(mockStore.users[0].email, 'growdeshit@gmail.com');
+  assert.equal(mockStore.users[0].phone, '+8801806476652');
+  assert.equal(mockStore.users[0].role, 'superadmin');
+  assert.notEqual(mockStore.users[0].password_hash, 'Password#Password');
+  assert.equal(bcrypt.compareSync('Password#Password', DEFAULT_SUPERADMIN.passwordHash), true);
+  assert.equal(bcrypt.compareSync('wrong-password', DEFAULT_SUPERADMIN.passwordHash), false);
+
+  // Subsequent runs must never duplicate or overwrite existing user data
+  mockStore.users[0].name = 'Emon Hosen (Updated)';
+  seedMemoryDefaultSuperadmin(mockStore);
+  assert.equal(mockStore.users.length, 1);
+  assert.equal(mockStore.users[0].name, 'Emon Hosen (Updated)');
 });

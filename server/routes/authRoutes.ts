@@ -5,15 +5,11 @@ import {
   listUsersHandler,
   loginHandler,
   meHandler,
-  setupHandler,
-  setupStatusHandler,
 } from '../controllers/authController';
 import { authenticateJWT, requireRole } from '../middleware/authMiddleware';
 
 const router = Router();
 
-router.get('/setup-status', setupStatusHandler);
-router.post('/setup', setupHandler);
 router.post('/login', loginHandler);
 
 router.get('/me', authenticateJWT, meHandler);

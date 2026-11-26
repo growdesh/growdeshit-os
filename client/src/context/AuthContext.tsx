@@ -5,17 +5,9 @@ import type { User } from '../types/models';
 interface AuthContextValue {
   user: User | null;
   token: string | null;
-  needsSetup: boolean;
   loading: boolean;
-  setupSuperadmin: (input: {
-    name: string;
-    email: string;
-    phone: string;
-    password: string;
-  }) => Promise<void>;
   login: (identifier: string, password: string) => Promise<void>;
   logout: () => void;
-  refreshSetupStatus: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -23,8 +15,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
-  const [needsSetup, setNeedsSetup] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const loading = false;
 
   const logout = useCallback(() => {
     setApiAuthToken(null);
@@ -32,40 +23,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
-  const refreshSetupStatus = useCallback(async () => {
-    try {
-      const status = await api.getSetupStatus();
-      setNeedsSetup(status.needsSetup);
-    } catch (error) {
-      console.error('Failed to check setup status:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     setUnauthorizedHandler(logout);
-    void refreshSetupStatus();
     return () => setUnauthorizedHandler(null);
-  }, [logout, refreshSetupStatus]);
-
-  const setupSuperadmin = useCallback(
-    async (input: { name: string; email: string; phone: string; password: string }) => {
-      const result = await api.setupSuperadmin(input);
-      setApiAuthToken(result.token);
-      setToken(result.token);
-      setUser(result.user);
-      setNeedsSetup(false);
-    },
-    []
-  );
+  }, [logout]);
 
   const login = useCallback(async (identifier: string, password: string) => {
     const result = await api.login({ identifier, password });
     setApiAuthToken(result.token);
     setToken(result.token);
     setUser(result.user);
-    setNeedsSetup(false);
   }, []);
 
   return (
@@ -73,12 +40,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         token,
-        needsSetup,
         loading,
-        setupSuperadmin,
         login,
         logout,
-        refreshSetupStatus,
       }}
     >
       {children}

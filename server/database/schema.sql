@@ -1,6 +1,13 @@
 -- GrowDeshIT OS — MySQL 8+ Production Schema
--- Compatible with Hostinger Business Web Hosting (MySQL / MariaDB)
--- Import this file via phpMyAdmin or MySQL CLI before starting the server in production.
+-- Compatible with Hostinger Business Web Hosting & shared MySQL/MariaDB environments.
+-- Note: The server automatically creates these tables, runs migrations, and seeds the
+-- initial Superadmin account on first startup/visit. This file serves as the canonical reference.
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version VARCHAR(64) PRIMARY KEY,
+  description VARCHAR(255) NOT NULL,
+  applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS users (
   id INT AUTO_INCREMENT PRIMARY KEY,

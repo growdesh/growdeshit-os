@@ -32,99 +32,6 @@ export class AuthError extends Error {
   }
 }
 
-export async function getSetupStatus(): Promise<{ needsSetup: boolean; envAdminConfigured: boolean }> {
-  const envAdminConfigured = Boolean(
-    process.env.ADMIN_EMAIL?.trim() && process.env.ADMIN_PASSWORD?.trim()
-  );
-
-  if (isMysqlMode()) {
-    const [rows] = await getPool().execute<RowDataPacket[]>('SELECT COUNT(*) AS count FROM users');
-    const count = Number(rows[0]?.count ?? 0);
-    return { needsSetup: count === 0 && !envAdminConfigured, envAdminConfigured };
-  }
-
-  return {
-    needsSetup: memoryStore.users.length === 0 && !envAdminConfigured,
-    envAdminConfigured,
-  };
-}
-
-export async function claimInitialSuperadmin(input: {
-  name: string;
-  email: string;
-  phone: string;
-  password: string;
-}): Promise<{ token: string; user: SafeUser }> {
-  const status = await getSetupStatus();
-  if (!status.needsSetup) {
-    throw new AuthError('Workspace administrator is already configured. Please sign in.', 409);
-  }
-
-  const name = input.name?.trim();
-  const email = normalizeIdentifier(input.email || '');
-  const phone = input.phone?.trim();
-  const password = input.password || '';
-
-  if (!name || name.length < 2) {
-    throw new AuthError('Full name is required (at least 2 characters).', 400);
-  }
-  if (!email || !email.includes('@')) {
-    throw new AuthError('A valid email address is required.', 400);
-  }
-  if (!phone || phone.length < 6) {
-    throw new AuthError('A valid phone number is required.', 400);
-  }
-  if (password.length < 6) {
-    throw new AuthError('Password must be at least 6 characters long.', 400);
-  }
-
-  const passwordHash = await bcrypt.hash(password, 10);
-
-  let createdUser: UserRecord;
-  if (isMysqlMode()) {
-    const pool = getPool();
-    const [countRows] = await pool.execute<RowDataPacket[]>('SELECT COUNT(*) AS count FROM users');
-    if (Number(countRows[0]?.count ?? 0) > 0) {
-      throw new AuthError('Workspace administrator is already configured. Please sign in.', 409);
-    }
-
-    const [result] = await pool.execute<ResultSetHeader>(
-      'INSERT INTO users (name, email, phone, password_hash, role) VALUES (?, ?, ?, ?, ?)',
-      [name, email, phone, passwordHash, 'superadmin']
-    );
-
-    const [rows] = await pool.execute<RowDataPacket[]>(
-      'SELECT id, name, email, phone, password_hash, role, created_at FROM users WHERE id = ? LIMIT 1',
-      [result.insertId]
-    );
-    createdUser = rows[0] as UserRecord;
-  } else {
-    if (memoryStore.users.length > 0) {
-      throw new AuthError('Workspace administrator is already configured. Please sign in.', 409);
-    }
-    createdUser = {
-      id: memoryStore.seq.users++,
-      name,
-      email,
-      phone,
-      password_hash: passwordHash,
-      role: 'superadmin',
-      created_at: new Date().toISOString(),
-    };
-    memoryStore.users.push(createdUser);
-  }
-
-  const safeUser = toSafeUser(createdUser);
-  const token = signAuthToken({
-    userId: safeUser.id,
-    name: safeUser.name,
-    email: safeUser.email,
-    role: safeUser.role,
-  });
-
-  return { token, user: safeUser };
-}
-
 export async function loginUser(input: {
   identifier: string;
   password: string;
@@ -142,8 +49,13 @@ export async function loginUser(input: {
   let found: UserRecord | undefined;
   if (isMysqlMode()) {
     const [rows] = await getPool().execute<RowDataPacket[]>(
-      'SELECT id, name, email, phone, password_hash, role, created_at FROM users WHERE LOWER(email) = ? OR phone = ? LIMIT 1',
-      [normalizedEmail, identifier]
+      `SELECT id, name, email, phone, password_hash, role, created_at
+       FROM users
+       WHERE LOWER(email) = ?
+          OR phone = ?
+          OR REPLACE(REPLACE(REPLACE(REPLACE(phone, ' ', ''), '-', ''), '(', ''), ')', '') = ?
+       LIMIT 1`,
+      [normalizedEmail, identifier, normalizedPhoneDigits]
     );
     found = rows[0] as UserRecord | undefined;
   } else {

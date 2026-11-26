@@ -74,13 +74,6 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 export const api = {
   // Auth & Team
-  getSetupStatus: () =>
-    request<{ needsSetup: boolean; envAdminConfigured: boolean }>('/api/auth/setup-status'),
-  setupSuperadmin: (body: { name: string; email: string; phone: string; password: string }) =>
-    request<{ token: string; user: User }>('/api/auth/setup', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
   login: (body: { identifier: string; password: string }) =>
     request<{ token: string; user: User }>('/api/auth/login', {
       method: 'POST',

@@ -1,5 +1,5 @@
 import express, { type Express, type NextFunction, type Request, type Response } from 'express';
-import { isMysqlMode } from './config/db';
+import { ensureDatabaseInitialized, isDatabaseInitialized, isMysqlMode } from './config/db';
 import authRoutes from './routes/authRoutes';
 import auditRoutes from './routes/auditRoutes';
 import customerRoutes from './routes/customerRoutes';
@@ -37,11 +37,21 @@ export function createExpressApp(): Express {
 
   app.use(express.json({ limit: '1mb' }));
 
+  app.use('/api', async (_req: Request, _res: Response, next: NextFunction) => {
+    try {
+      await ensureDatabaseInitialized();
+      next();
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({
       status: 'ok',
       service: 'GrowDeshIT OS API',
       storage: isMysqlMode() ? 'mysql' : 'preview',
+      initialized: isDatabaseInitialized(),
     });
   });
 

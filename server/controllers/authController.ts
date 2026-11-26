@@ -3,10 +3,8 @@ import type { AuthenticatedRequest } from '../middleware/authMiddleware';
 import { logActivity } from '../services/auditService';
 import {
   AuthError,
-  claimInitialSuperadmin,
   createTeamMember,
   deleteTeamMember,
-  getSetupStatus,
   getUserById,
   listUsers,
   loginUser,
@@ -19,35 +17,6 @@ function handleAuthError(res: Response, error: unknown): void {
   }
   console.error('[AuthController]', error);
   res.status(500).json({ error: 'Authentication service error.' });
-}
-
-export async function setupStatusHandler(_req: Request, res: Response): Promise<void> {
-  try {
-    const status = await getSetupStatus();
-    res.json(status);
-  } catch (error) {
-    handleAuthError(res, error);
-  }
-}
-
-export async function setupHandler(req: Request, res: Response): Promise<void> {
-  try {
-    const { name, email, phone, password } = req.body || {};
-    const result = await claimInitialSuperadmin({ name, email, phone, password });
-    await logActivity({
-      user_id: result.user.id,
-      user_name: result.user.name,
-      user_role: result.user.role,
-      action: 'auth.workspace_initialized',
-      entity_type: 'Team',
-      entity_id: `USR-${result.user.id}`,
-      source: 'Web',
-      details: `Initialized workspace and created superadmin account (${result.user.email})`,
-    });
-    res.status(201).json(result);
-  } catch (error) {
-    handleAuthError(res, error);
-  }
 }
 
 export async function loginHandler(req: Request, res: Response): Promise<void> {

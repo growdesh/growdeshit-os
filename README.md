@@ -36,16 +36,14 @@ Digital Service Business Management System built for small agency teams (4–5 e
    ```bash
    cp .env.example .env
    ```
-3. (Optional for local MySQL) Create a MySQL database and import the schema:
-   ```bash
-   mysql -u root -p your_database < server/database/schema.sql
-   ```
-   If `DB_HOST` is left blank, the server runs with a pre-seeded BDT preview store.
+3. (Optional for local MySQL) Create an empty MySQL database and set `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` in `.env`.
+   - On startup or first request, the server automatically connects to MySQL, creates all required tables, runs pending migrations (`schema_migrations`), and seeds the initial Superadmin account once without overwriting existing records.
+   - If `DB_HOST` is left blank, the server runs with a pre-seeded BDT preview store.
 4. Start development server on port `3000`:
    ```bash
    npm run dev
    ```
-5. On first run (when `ADMIN_PASSWORD` is unset), open `http://localhost:3000` to create your initial `superadmin` account.
+5. Open `http://localhost:3000` and sign in with your database-managed account.
 6. Run unit tests:
    ```bash
    npm test
@@ -75,22 +73,22 @@ GrowDeshIT OS exposes a Streamable HTTP MCP server at `POST /api/mcp` authentica
    - Role permissions (`superadmin` vs `employee`) are enforced identically across Web and MCP.
    - Every MCP tool call is logged to **Activity Logs** with `Source: MCP`.
 
-## Deploying to Hostinger Business Web Hosting (Node.js + MySQL)
+## Automatic Deployment (Hostinger & Shared Hosting)
 
-1. **Create MySQL Database in Hostinger hPanel**:
+1. **Create an Empty MySQL Database in Hosting Control Panel**:
    - Open **Databases → Management**, create a MySQL database and user, and note `DB_HOST`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`.
-   - Open **phpMyAdmin** for that database and import `server/database/schema.sql`.
-2. **Build the Frontend Bundle**:
+   - Manual SQL import is not required — the app automatically creates tables, runs versioned migrations, and seeds the initial Superadmin account once on first start/visit without overwriting existing records.
+2. **Configure Environment Variables in Hosting Control Panel**:
+   - `NODE_ENV=production`
+   - `PORT=3000` (Honors hosting-injected `process.env.PORT || 3000`)
+   - `DB_HOST`, `DB_PORT=3306`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
+   - `JWT_SECRET` (generate a strong 32+ character random string)
+3. **Build & Start**:
    ```bash
    npm install
    npm run build
+   npm start
    ```
-   This outputs the production React SPA + PWA service worker into `/dist`.
-3. **Configure Environment Variables in Hostinger Node.js App**:
-   - `NODE_ENV=production`
-   - `PORT=3000` (Hostinger automatically injects `process.env.PORT`; `server.ts` honors `process.env.PORT || 3000`)
-   - `DB_HOST`, `DB_PORT=3306`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`
-   - `JWT_SECRET` (generate a strong 32+ character random string)
-   - Optionally set `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PHONE`, `ADMIN_PASSWORD` or claim the first `superadmin` account via the browser setup screen.
-4. **Start the Production Server**:
-   - Set startup entry file to `server.ts` (or run `npx tsx server.ts` / `npm start` on Node 22+). Express automatically serves `/dist` and all `/api/*` endpoints from the same origin.
+   Express automatically initializes the database and serves `/dist` and all `/api/*` endpoints from the same origin.
+4. **GitHub & Hosting Synchronization**:
+   - Follow `AGENTS.md`: whenever changes are pushed or merged into GitHub, update the hosting server with the latest codebase so both remain synchronized.

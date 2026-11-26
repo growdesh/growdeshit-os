@@ -1,5 +1,6 @@
+import dns from 'node:dns/promises';
 import mysql, { Pool } from 'mysql2/promise';
-import bcrypt from 'bcryptjs';
+import { runMysqlBootstrap, seedMemoryDefaultSuperadmin } from '../database/bootstrap';
 import type {
   ActivitySource,
   CustomerStatus,
@@ -171,6 +172,17 @@ export interface MemoryStore {
 
 let mysqlPool: Pool | null = null;
 let mysqlActive = false;
+let initialized = false;
+let lastMysqlFailureAt = 0;
+let lastLoggedMysqlFailureCode: string | null = null;
+let bootstrapInFlight: Promise<{ mode: 'mysql' | 'memory' }> | null = null;
+const MYSQL_RETRY_COOLDOWN_MS = 60000;
+
+function isMysqlConfigured(): boolean {
+  return Boolean(
+    process.env.DB_HOST?.trim() && process.env.DB_USER?.trim() && process.env.DB_NAME?.trim()
+  );
+}
 
 function createSeedMemoryStore(): MemoryStore {
   const todayIso = new Date().toISOString().slice(0, 10);
@@ -607,95 +619,138 @@ function createSeedMemoryStore(): MemoryStore {
 
 export const memoryStore: MemoryStore = createSeedMemoryStore();
 
-export async function initializeDatabase(): Promise<{ mode: 'mysql' | 'memory' }> {
+async function connectAndBootstrapMysql(
+  connectHost: string,
+  port: number,
+  user: string,
+  password: string,
+  database: string
+): Promise<Pool> {
+  const candidatePool = mysql.createPool({
+    host: connectHost,
+    port,
+    user,
+    password,
+    database,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    connectTimeout: 8000,
+    decimalNumbers: true,
+  });
+
+  try {
+    const connection = await candidatePool.getConnection();
+    await connection.ping();
+    connection.release();
+    await runMysqlBootstrap(candidatePool);
+    return candidatePool;
+  } catch (error) {
+    await candidatePool.end().catch(() => {});
+    throw error;
+  }
+}
+
+async function performDatabaseInitialization(): Promise<{ mode: 'mysql' | 'memory' }> {
   const host = process.env.DB_HOST?.trim();
   const user = process.env.DB_USER?.trim();
   const database = process.env.DB_NAME?.trim();
 
   if (host && user && database) {
-    try {
-      mysqlPool = mysql.createPool({
-        host,
-        port: Number(process.env.DB_PORT || 3306),
-        user,
-        password: process.env.DB_PASSWORD || '',
-        database,
-        waitForConnections: true,
-        connectionLimit: 10,
-        queueLimit: 0,
-        decimalNumbers: true,
-      });
+    const port = Number(process.env.DB_PORT || 3306);
+    const password = process.env.DB_PASSWORD || '';
+    const candidateHosts = [host];
 
-      const connection = await mysqlPool.getConnection();
-      await connection.ping();
-      connection.release();
-      mysqlActive = true;
-      await bootstrapEnvSuperadmin();
-      console.log(`[GrowDeshIT OS] Connected to MySQL database "${database}" on ${host}.`);
-      return { mode: 'mysql' };
-    } catch (error) {
-      console.error(
-        '[GrowDeshIT OS] MySQL connection failed, falling back to local preview store:',
-        error
+    // If host is a domain name (e.g. Hostinger srv*.hstgr.io), also allow IPv4 fallback
+    // because shared hosting Remote MySQL rules frequently allow IPv4 rather than IPv6.
+    if (host !== 'localhost' && !/^\d+\.\d+\.\d+\.\d+$/.test(host) && !host.includes(':')) {
+      try {
+        const ipv4List = await dns.resolve4(host);
+        if (ipv4List[0] && ipv4List[0] !== host) {
+          candidateHosts.push(ipv4List[0]);
+        }
+      } catch {
+        // Ignore DNS IPv4 lookup errors and rely on default host resolution
+      }
+    }
+
+    let lastError: unknown = null;
+    for (const connectHost of candidateHosts) {
+      try {
+        const pool = await connectAndBootstrapMysql(connectHost, port, user, password, database);
+        mysqlPool = pool;
+        mysqlActive = true;
+        initialized = true;
+        lastMysqlFailureAt = 0;
+        lastLoggedMysqlFailureCode = null;
+        console.log(
+          `[GrowDeshIT OS] Connected to MySQL database "${database}" via ${connectHost} and verified schema/migrations.`
+        );
+        return { mode: 'mysql' };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    mysqlPool = null;
+    mysqlActive = false;
+    lastMysqlFailureAt = Date.now();
+    const errObj = lastError as { code?: string; sqlMessage?: string; message?: string } | null;
+    const failureKey = `${errObj?.code || 'MYSQL_ERR'}:${errObj?.sqlMessage || errObj?.message || 'unknown'}`;
+    if (lastLoggedMysqlFailureCode !== failureKey) {
+      lastLoggedMysqlFailureCode = failureKey;
+      console.warn(
+        `[GrowDeshIT OS] MySQL unavailable (${errObj?.code || 'CONNECTION_ERROR'}: ${
+          errObj?.sqlMessage || errObj?.message || 'Unable to connect'
+        }). Using local preview store until MySQL access is granted.`
       );
-      mysqlPool = null;
-      mysqlActive = false;
     }
   }
 
-  await bootstrapEnvSuperadmin();
-  console.log(
-    '[GrowDeshIT OS] Running with built-in preview store (configure DB_HOST/DB_USER/DB_NAME for MySQL).'
-  );
+  seedMemoryDefaultSuperadmin(memoryStore);
+  initialized = true;
+  if (!isMysqlConfigured()) {
+    console.log(
+      '[GrowDeshIT OS] Running with built-in preview store (configure DB_HOST/DB_USER/DB_NAME for MySQL).'
+    );
+  }
   return { mode: 'memory' };
 }
 
-async function bootstrapEnvSuperadmin(): Promise<void> {
-  const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
-  const adminPassword = process.env.ADMIN_PASSWORD?.trim();
-  if (!adminEmail || !adminPassword) {
+export async function initializeDatabase(): Promise<{ mode: 'mysql' | 'memory' }> {
+  if (bootstrapInFlight) {
+    return bootstrapInFlight;
+  }
+
+  bootstrapInFlight = performDatabaseInitialization().finally(() => {
+    bootstrapInFlight = null;
+  });
+  return bootstrapInFlight;
+}
+
+/**
+ * Concurrency-safe lazy bootstrap invoked on incoming API requests so shared-hosting
+ * environments initialize automatically on first visit even if DB wasn't ready at cold boot.
+ */
+export async function ensureDatabaseInitialized(): Promise<void> {
+  if (initialized && (mysqlActive || !isMysqlConfigured())) {
     return;
   }
 
-  const adminName = process.env.ADMIN_NAME?.trim() || 'Super Admin';
-  const adminPhone = process.env.ADMIN_PHONE?.trim() || '+880 1700-000000';
-  const passwordHash = await bcrypt.hash(adminPassword, 10);
-
-  if (mysqlActive && mysqlPool) {
-    const [rows] = await mysqlPool.execute('SELECT id FROM users WHERE email = ? LIMIT 1', [
-      adminEmail,
-    ]);
-    const existing = rows as Array<{ id: number }>;
-    if (existing.length === 0) {
-      await mysqlPool.execute(
-        'INSERT INTO users (name, email, phone, password_hash, role) VALUES (?, ?, ?, ?, ?)',
-        [adminName, adminEmail, adminPhone, passwordHash, 'superadmin']
-      );
-    } else {
-      await mysqlPool.execute('UPDATE users SET password_hash = ?, role = ? WHERE id = ?', [
-        passwordHash,
-        'superadmin',
-        existing[0].id,
-      ]);
-    }
+  if (
+    isMysqlConfigured() &&
+    !mysqlActive &&
+    lastMysqlFailureAt > 0 &&
+    Date.now() - lastMysqlFailureAt < MYSQL_RETRY_COOLDOWN_MS
+  ) {
     return;
   }
 
-  const existing = memoryStore.users.find((u) => u.email.toLowerCase() === adminEmail);
-  if (!existing) {
-    memoryStore.users.push({
-      id: memoryStore.seq.users++,
-      name: adminName,
-      email: adminEmail,
-      phone: adminPhone,
-      password_hash: passwordHash,
-      role: 'superadmin',
-      created_at: new Date().toISOString(),
-    });
-  } else {
-    existing.password_hash = passwordHash;
-    existing.role = 'superadmin';
-  }
+  await initializeDatabase();
+}
+
+export function isDatabaseInitialized(): boolean {
+  return initialized;
 }
 
 export function isMysqlMode(): boolean {
