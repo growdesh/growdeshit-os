@@ -1,0 +1,6 @@
+{
+  "name": "GrowDeshIT OS",
+  "description": "Digital Service Business Management System for small agency teams featuring CRM, Project Management, Tasks, Categorized Notes, Finance Ledger, Invoicing, and PWA support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
